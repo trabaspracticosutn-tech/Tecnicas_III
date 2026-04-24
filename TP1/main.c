@@ -18,10 +18,10 @@
 #define pinTrigger_Out  GPIObits.GP4
 #define pinEcho_In      GPIObits.GP5
 
-#define LEJANA 2030        //35cm
-#define INTERMEDIA 1160    //20cm
-#define CERCANA 580        //10cm 
-#define CRITICA 435        //7,5cm
+#define LEJANA 150        
+#define INTERMEDIA 100    
+#define CERCANA 70         
+#define CRITICA 30       
 
 
 
@@ -37,7 +37,7 @@ void Init(void){
 }
 
 uint16_t Contador(void){
-    uint32_t timeout = 30000;
+    uint32_t timeout = 300*58;
 
     // esperar subida
     while(!pinEcho_In && timeout--);
@@ -46,7 +46,7 @@ uint16_t Contador(void){
     TMR1H = 0;
     TMR1L = 0;
 
-    timeout = 30000;
+    timeout = 300*58;
 
     // esperar bajada
     while(pinEcho_In && timeout--);
@@ -65,27 +65,47 @@ void SerialIn(void){
     }
 }
 
-void Alerta(uint16_t tmp){
+uint16_t Alerta(uint16_t tmp){
     if (tmp >= LEJANA) {
         
         pinBuffer_Out  = 0;
         
-    } else if (tmp >= INTERMEDIA) {
+        return 0;
+    }  
+    
+    if (tmp <= LEJANA && tmp >= INTERMEDIA) {
         
         pinBuffer_Out  = 1;
-        __delay_ms(600);
+        __delay_ms(60);
         pinBuffer_Out  = 0;
         
-    } else if (tmp >= CERCANA) {
-        
-        pinBuffer_Out  = 1;
-        __delay_ms(300  );
-        pinBuffer_Out  = 0;
-        
-    } else if ( tmp <= CRITICA && tmp > 0){
-        
-        pinBuffer_Out  = 1;
+        return 1;
     } 
+    
+    if (tmp <= INTERMEDIA && tmp >= CERCANA) {
+        
+        pinBuffer_Out  = 1;
+        __delay_ms(30);
+        pinBuffer_Out  = 0;
+        
+        return 2;
+    }
+    
+    if ( tmp <= CERCANA && tmp >= CRITICA){
+        
+        pinBuffer_Out  = 1;
+        __delay_ms(20);
+        pinBuffer_Out  = 0;
+        
+        return 3;
+    }
+    
+    if ( tmp <= CRITICA && tmp > 0){
+        
+        pinBuffer_Out  = 1;
+
+        return 0;
+    }
 }
 
 void uart_tx_byte(uint8_t data){
@@ -113,7 +133,7 @@ void uart_tx_string(const char *str){
 }
 
 void uart_tx_num(uint16_t num){
-    char buffer[8];
+    char buffer[7];
     uint8_t i = 0;
 
     if (num == 0)
@@ -134,26 +154,74 @@ void uart_tx_num(uint16_t num){
     }
 }
 
+void Disparo (void){
+    pinTrigger_Out = 0;
+    __delay_us(2);
+    pinTrigger_Out = 1;
+    __delay_us(10);
+    pinTrigger_Out = 0;
+}
+
+uint16_t mediana3(uint16_t a, uint16_t b, uint16_t c)
+{
+    a = a / 58;
+    b = b / 58;
+    c = c / 58;
+    
+    if ((a>=b && a<=c)||(a>=c && a<=b)) return a;
+    if ((b>=a && b<=c)||(b>=c && b<=a)) return b;
+    return c;
+}
+
+uint16_t filtro_prom(uint16_t nueva)
+{
+    static uint16_t f = 0;
+    f = (f*3 + nueva) / 4;
+    return f;
+}
+
+
 void main (void){
-    uint16_t tiempo;
-    uint16_t distancia;
+    uint16_t tiempo[3];
+    uint16_t distancia, dist_f;
+    uint16_t status;
+    
     Init();
     
     while(1){
        // SerialIn();
-        pinTrigger_Out = 0;
-        __delay_us(2);
-        pinTrigger_Out = 1;
-        __delay_us(10);
-        pinTrigger_Out = 0;
-        tiempo = Contador();
-        //Alerta(tiempo);
-        distancia = tiempo / 58;
+        Disparo();
+        tiempo[0] = Contador();
+        Disparo();
+        tiempo[1] = Contador();
+        Disparo();
+        tiempo[2] = Contador();
+        
+        distancia = mediana3(tiempo[0],tiempo[1],tiempo[2]);
+        dist_f = filtro_prom(distancia);
+        
+        status = Alerta(dist_f);
         
         uart_tx_string("Dist: ");
-        uart_tx_num(distancia);
+        uart_tx_num(dist_f);
         uart_tx_string(" cm\n\r");
 
-        __delay_ms(60);    
+        switch(status){
+            case 0: 
+                __delay_ms(100);
+                break;
+            case 1:
+                __delay_ms(40);
+                break;
+            case 2:
+                __delay_ms(70);
+                break;
+            case 3:
+                __delay_ms(80);
+                break;
+            default:
+                __delay_ms(100);
+                break;
+        }
     }
 }
